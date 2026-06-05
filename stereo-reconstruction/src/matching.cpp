@@ -1,0 +1,198 @@
+#include "matching.h"
+#include "utils.h"
+#include <iostream>
+#include <stdexcept>
+#include <filesystem>
+
+namespace fs = std::filesystem;
+
+// ── Manual SAD (DONE) ──────────────────────────────────────────
+static cv::Mat computeSAD(const cv::Mat& left, const cv::Mat& right,
+                           const MatchParams& p) {
+    int half = p.window_size / 2;
+    cv::Mat disp(left.size(), CV_32F, -1.0f);
+
+    for (int y = half; y < left.rows - half; ++y) {
+        for (int x = half + p.min_disparity + p.num_disparities;
+             x < left.cols - half; ++x) {
+            float best_cost = std::numeric_limits<float>::max();
+            int   best_d    = -1;
+            for (int d = p.min_disparity; d < p.min_disparity + p.num_disparities; ++d) {
+                int xr = x - d;
+                if (xr - half < 0) break;
+                float cost = 0;
+                for (int dy = -half; dy <= half; ++dy)
+                    for (int dx = -half; dx <= half; ++dx)
+                        cost += std::abs((float)left .at<uchar>(y+dy, x+dx) -
+                                         (float)right.at<uchar>(y+dy, xr+dx));
+                if (cost < best_cost) { best_cost = cost; best_d = d; }
+            }
+            disp.at<float>(y, x) = (float)best_d;
+        }
+    }
+    return disp;
+}
+
+// ── Manual SSD (DONE) ──────────────────────────────────────────
+static cv::Mat computeSSD(const cv::Mat& left, const cv::Mat& right,
+                           const MatchParams& p) {
+    int half = p.window_size / 2;
+    cv::Mat disp(left.size(), CV_32F, -1.0f);
+
+    for (int y = half; y < left.rows - half; ++y) {
+        for (int x = half + p.min_disparity + p.num_disparities;
+             x < left.cols - half; ++x) {
+            float best_cost = std::numeric_limits<float>::max();
+            int   best_d    = -1;
+            for (int d = p.min_disparity; d < p.min_disparity + p.num_disparities; ++d) {
+                int xr = x - d;
+                if (xr - half < 0) break;
+                float cost = 0;
+                for (int dy = -half; dy <= half; ++dy)
+                    for (int dx = -half; dx <= half; ++dx) {
+                        float diff = (float)left .at<uchar>(y+dy, x+dx) -
+                                     (float)right.at<uchar>(y+dy, xr+dx);
+                        cost += diff * diff;
+                    }
+                if (cost < best_cost) { best_cost = cost; best_d = d; }
+            }
+            disp.at<float>(y, x) = (float)best_d;
+        }
+    }
+    return disp;
+}
+
+// ── Manual NCC (DONE) ──────────────────────────────────────────
+static cv::Mat computeNCC(const cv::Mat& left, const cv::Mat& right,
+                           const MatchParams& p) {
+    int half = p.window_size / 2;
+    int N    = p.window_size * p.window_size;
+    cv::Mat disp(left.size(), CV_32F, -1.0f);
+
+    for (int y = half; y < left.rows - half; ++y) {
+        for (int x = half + p.min_disparity + p.num_disparities;
+             x < left.cols - half; ++x) {
+            float best_ncc = -2.0f;
+            int   best_d   = -1;
+            for (int d = p.min_disparity; d < p.min_disparity + p.num_disparities; ++d) {
+                int xr = x - d;
+                if (xr - half < 0) break;
+                float sumL=0, sumR=0, sumLL=0, sumRR=0, sumLR=0;
+                for (int dy = -half; dy <= half; ++dy)
+                    for (int dx = -half; dx <= half; ++dx) {
+                        float l = left .at<uchar>(y+dy, x+dx);
+                        float r = right.at<uchar>(y+dy, xr+dx);
+                        sumL+=l; sumR+=r; sumLL+=l*l; sumRR+=r*r; sumLR+=l*r;
+                    }
+                float meanL = sumL/N, meanR = sumR/N;
+                float num   = sumLR - N*meanL*meanR;
+                float den   = std::sqrt((sumLL - N*meanL*meanL) *
+                                        (sumRR - N*meanR*meanR));
+                float ncc = (den < 1e-6f) ? 0.0f : num / den;
+                if (ncc > best_ncc) { best_ncc = ncc; best_d = d; }
+            }
+            disp.at<float>(y, x) = (float)best_d;
+        }
+    }
+    return disp;
+}
+
+// ── TODO: Advanced matching improvements ──────────────────────
+// TODO-A: Sub-pixel refinement
+//   After finding best integer disparity, fit a parabola to cost[d-1], cost[d], cost[d+1]
+//   → sub-pixel accuracy: d_sub = d - 0.5 * (cost[d+1]-cost[d-1]) / (cost[d+1]-2*cost[d]+cost[d-1])
+
+// TODO-B: Left-right consistency check
+//   Compute disparity from left→right AND right→left
+//   Mark pixel as invalid if |disp_lr[x] - disp_rl[x - disp_lr[x]]| > threshold (e.g. 1px)
+
+// TODO-C: Disparity post-processing
+//   - Median filter to remove outliers
+//   - Hole filling for invalid pixels (interpolate from neighbors)
+
+// TODO-D: Runtime comparison
+//   Measure and log time for SAD vs SSD vs NCC vs OpenCV BM vs SGBM
+//   Use std::chrono::high_resolution_clock
+
+// ── Public interface ───────────────────────────────────────────
+cv::Mat computeDisparity(const cv::Mat& left_rect, const cv::Mat& right_rect,
+                          const MatchParams& params) {
+    cv::Mat gray_l, gray_r;
+    if (left_rect.channels() == 3) {
+        cv::cvtColor(left_rect,  gray_l, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(right_rect, gray_r, cv::COLOR_BGR2GRAY);
+    } else {
+        gray_l = left_rect;
+        gray_r = right_rect;
+    }
+
+    switch (params.method) {
+    case MatchMethod::OPENCV_BM: {
+        auto bm = cv::StereoBM::create(params.num_disparities, params.window_size);
+        cv::Mat disp16;
+        bm->compute(gray_l, gray_r, disp16);
+        cv::Mat disp32;
+        disp16.convertTo(disp32, CV_32F, 1.0 / 16.0);
+        return disp32;
+    }
+    case MatchMethod::OPENCV_SGBM: {
+        auto sgbm = cv::StereoSGBM::create(
+            params.min_disparity, params.num_disparities, params.window_size);
+        sgbm->setP1(8  * 3 * params.window_size * params.window_size);
+        sgbm->setP2(32 * 3 * params.window_size * params.window_size);
+        cv::Mat disp16;
+        sgbm->compute(gray_l, gray_r, disp16);
+        cv::Mat disp32;
+        disp16.convertTo(disp32, CV_32F, 1.0 / 16.0);
+        return disp32;
+    }
+    case MatchMethod::MANUAL_SAD:
+        std::cout << "[matching] SAD window=" << params.window_size << "\n";
+        return computeSAD(gray_l, gray_r, params);
+    case MatchMethod::MANUAL_SSD:
+        std::cout << "[matching] SSD window=" << params.window_size << "\n";
+        return computeSSD(gray_l, gray_r, params);
+    case MatchMethod::MANUAL_NCC:
+        std::cout << "[matching] NCC window=" << params.window_size << "\n";
+        return computeNCC(gray_l, gray_r, params);
+    default:
+        throw std::runtime_error("Unknown match method");
+    }
+}
+
+#ifndef PIPELINE_BUILD
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::cerr << "Usage: matching <scene_dir> [sad|ssd|ncc|bm|sgbm]\n";
+        return 1;
+    }
+    fs::path scene(argv[1]);
+    std::string method_str = (argc >= 3) ? argv[2] : "sgbm";
+
+    MatchParams params;
+    if      (method_str == "sad")  params.method = MatchMethod::MANUAL_SAD;
+    else if (method_str == "ssd")  params.method = MatchMethod::MANUAL_SSD;
+    else if (method_str == "ncc")  params.method = MatchMethod::MANUAL_NCC;
+    else if (method_str == "bm")   params.method = MatchMethod::OPENCV_BM;
+    else                           params.method = MatchMethod::OPENCV_SGBM;
+
+    CalibData calib = loadCalib(scene);
+    params.num_disparities = calib.ndisp;
+
+    cv::Mat left_rect  = cv::imread("results/left_rect.png");
+    cv::Mat right_rect = cv::imread("results/right_rect.png");
+    if (left_rect.empty()) {
+        std::cerr << "Run rectification first.\n"; return 1;
+    }
+
+    auto disp = computeDisparity(left_rect, right_rect, params);
+
+    cv::Mat disp_vis;
+    cv::normalize(disp, disp_vis, 0, 255, cv::NORM_MINMAX, CV_8U);
+    cv::applyColorMap(disp_vis, disp_vis, cv::COLORMAP_JET);
+    cv::imwrite("results/disparity.png", disp_vis);
+    saveDisparity(disp, "results/disparity_raw.png");
+    std::cout << "Saved disparity to results/\n";
+    return 0;
+}
+#endif
