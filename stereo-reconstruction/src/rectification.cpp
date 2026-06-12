@@ -1,14 +1,20 @@
+#include "DataLoader.h"
 #include "rectification.h"
 #include "sparse_matching.h"
+#include "utils.h"
 #include <iostream>
+#include <stdexcept>
 
 // ── OpenCV baseline (DONE) ─────────────────────────────────────────────────
 RectifyResult rectifyOpenCV(const cv::Mat& left, const cv::Mat& right,
                              const CalibData& calib) {
     cv::Size img_size(left.cols, left.rows);
 
+    // DTU Dataset is undistorted
     cv::Mat D0 = cv::Mat::zeros(5, 1, CV_64F);
     cv::Mat D1 = cv::Mat::zeros(5, 1, CV_64F);
+
+    // TODO: temporary identity and no translation? Later will use R, t computed in sparse matching?
     cv::Mat T  = (cv::Mat_<double>(3,1) << -calib.baseline, 0, 0);
     cv::Mat R  = cv::Mat::eye(3, 3, CV_64F);
 
@@ -25,6 +31,10 @@ RectifyResult rectifyOpenCV(const cv::Mat& left, const cv::Mat& right,
     RectifyResult result;
     cv::remap(left,  result.left_rect,  map0x, map0y, cv::INTER_LINEAR);
     cv::remap(right, result.right_rect, map1x, map1y, cv::INTER_LINEAR);
+
+    if (result.left_rect.empty() || result.right_rect.empty())
+        throw std::runtime_error("[rectifyOpenCV] Rectified images are empty after remap.");
+
     result.Q  = Q;
     result.P1 = P1;
     result.P2 = P2;
@@ -37,7 +47,12 @@ RectifyResult rectifyOpenCV(const cv::Mat& left, const cv::Mat& right,
 RectifyResult rectifyManual(const cv::Mat& left, const cv::Mat& right,
                              const CalibData& calib) {
     // Step 1: Get relative pose from sparse matching (Member 1's output)
-    SparseMatchResult sparse = computeSparseMatches(left, right, calib);
+    SparseMatchResult sparse;
+    try {
+        sparse = computeSparseMatches(left, right, calib);
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("[rectifyManual] Sparse matching failed: ") + e.what());
+    }
 
     if (sparse.R.empty()) {
         std::cout << "[rectification] Pose recovery failed, falling back to OpenCV.\n";
@@ -77,28 +92,48 @@ RectifyResult rectifyManual(const cv::Mat& left, const cv::Mat& right,
 
 #ifndef PIPELINE_BUILD
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "Usage: rectification <scene_dir> [--manual]\n";
+    if (argc < 5) {
+        std::cerr << "Usage: rectification <data_path> <scene_id> <left_view_id> <right_view_id> [--manual] [--light <id>]\n";
         return 1;
     }
-    fs::path scene(argv[1]);
-    bool manual = (argc >= 3 && std::string(argv[2]) == "--manual");
+    fs::path dataPath(argv[1]);
+    const std::string sceneId(argv[2]);
+    const std::string viewLeftId = padViewId(std::stoi(argv[3]));
+    const std::string viewRightId = padViewId(std::stoi(argv[4]));
 
-    CalibData calib = loadCalib(scene);
-    cv::Mat left  = cv::imread((scene / "im0.png").string());
-    cv::Mat right = cv::imread((scene / "im1.png").string());
+    bool manual = false;
+    std::string lightId = "0";
 
-    if (left.empty() || right.empty()) {
-        std::cerr << "Could not load images from " << scene << "\n";
-        return 1;
+    for (int i = 5; i < argc; ++i) {
+        std::string a(argv[i]);
+        if (a == "--manual")
+            manual = true;
+
+        else if (a == "--light" && i+1 < argc)
+            lightId = argv[++i];
     }
 
-    auto result = manual ? rectifyManual(left, right, calib)
-                         : rectifyOpenCV(left, right, calib);
+    DTUDataLoader loader(dataPath.string());
+    CalibData calib = loader.loadCalib(viewLeftId, viewRightId);
 
-    fs::create_directories("results");
-    cv::imwrite("results/left_rect.png",  result.left_rect);
-    cv::imwrite("results/right_rect.png", result.right_rect);
+    cv::Mat imgLeft  = loader.loadImage(sceneId, viewLeftId, lightId);
+    cv::Mat imgRight = loader.loadImage(sceneId, viewRightId, lightId);
+    
+    
+    if (imgLeft.empty() || imgRight.empty()) {
+        std::cerr << "Could not load images.\n"; return 1;
+    }
+
+    std::cout << "Loaded views " << viewLeftId << " (left) and " << viewRightId << " (right)" << std::endl;
+
+    auto result = manual ? rectifyManual(imgLeft, imgRight, calib)
+                         : rectifyOpenCV(imgLeft, imgRight, calib);
+
+    std::string save_path = "results/scene" + sceneId + "/rectification";
+
+    fs::create_directories(save_path);
+    cv::imwrite(save_path + "/view_" + viewLeftId + ".png",  result.left_rect);
+    cv::imwrite(save_path + "/view_" + viewRightId + ".png", result.right_rect);
     std::cout << "Saved rectified images to results/\n";
     return 0;
 }
