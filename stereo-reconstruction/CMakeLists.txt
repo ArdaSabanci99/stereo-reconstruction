@@ -75,8 +75,9 @@ target_link_libraries(depth ${OpenCV_LIBS} Eigen3::Eigen)
 add_executable(evaluation src/evaluation.cpp src/utils.cpp)
 target_link_libraries(evaluation ${OpenCV_LIBS} Eigen3::Eigen)
 
-add_executable(icp src/icp.cpp src/depth.cpp src/utils.cpp)
+add_executable(icp src/icp.cpp src/depth.cpp src/utils.cpp src/DataLoader.cpp)
 target_link_libraries(icp ${OpenCV_LIBS} Eigen3::Eigen ceres)
+target_compile_definitions(icp PRIVATE BUILDING_ICP)
 target_include_directories(icp PRIVATE ${Flann_INCLUDE_DIR})
 
 # ── Pipeline (shared object library) ─────────────────────────────────────
