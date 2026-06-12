@@ -66,9 +66,16 @@ CalibData DTUDataLoader::loadCalib(const std::string & viewLeftId, const std::st
     std::cout << K1 << std::endl;
 
     CalibData calib;
-    calib.K0 = K0;
-    calib.K1 = K1;
-    
+    calib.K0 = K0; calib.K1 = K1;
+    calib.R0 = R0; calib.t0 = t0;
+    calib.R1 = R1; calib.t1 = t1;
+
+    // Relative pose: X_1 = R_rel * X_0 + T_rel  (in left-cam frame)
+    cv::Mat R_rel = R1 * R0.t();
+    cv::Mat T_rel = t1 - R_rel * t0;
+    calib.R_rel = R_rel;
+    calib.T_rel = T_rel;
+
     // find camera centers in WS
     cv::Mat C0 = -R0.t() * t0;
     cv::Mat C1 = -R1.t() * t1;

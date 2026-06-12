@@ -28,6 +28,7 @@ int main(int argc, char** argv) {
     mp.method      = MatchMethod::OPENCV_SGBM;
     mp.window_size = 5;
     bool manual_rect = false;
+    double img_scale = 0.25;  // downsample to bring disparity into SGBM range
 
     std::string lightId = "0";
 
@@ -45,8 +46,10 @@ int main(int argc, char** argv) {
             else if (m == "sgm")    mp.method = MatchMethod::MANUAL_SGM;
         }
         else if (a == "--window" && i+1 < argc) mp.window_size = std::stoi(argv[++i]);
-        else if (a == "--ndisp" && i+1 < argc) mp.num_disparities = std::stoi(argv[++i]);
-        else if (a == "--light" && i+1 < argc) lightId = argv[++i];
+        else if (a == "--ndisp"  && i+1 < argc) mp.num_disparities = std::stoi(argv[++i]);
+        else if (a == "--mindisp"&& i+1 < argc) mp.min_disparity   = std::stoi(argv[++i]);
+        else if (a == "--scale"  && i+1 < argc) img_scale = std::stod(argv[++i]);
+        else if (a == "--light"  && i+1 < argc) lightId = argv[++i];
     }
 
     // ── 1. Load data ───────────────────────────────────────────
@@ -64,6 +67,33 @@ int main(int argc, char** argv) {
     std::cout << "Loaded views " << viewLeftId << " (left) and " << viewRightId << " (right)\n";
     printMatInfo("Left Image",   imgLeft);
     printMatInfo("Right Image:", imgRight);
+
+    // ── Ensure left camera is geometrically to the left (T_rel[0] < 0) ─────
+    // stereoRectify/SGBM require the left camera center to be at negative
+    // x in the right camera's frame; if T_rel[0] > 0 the pair is reversed.
+    if (calib.T_rel.at<double>(0) > 0) {
+        std::cout << "[pipeline] Swapping left/right cameras (T_rel[0] > 0)\n";
+        std::swap(calib.K0, calib.K1);
+        std::swap(calib.R0, calib.R1);
+        std::swap(calib.t0, calib.t1);
+        std::swap(imgLeft,  imgRight);
+        calib.R_rel = calib.R1 * calib.R0.t();
+        calib.T_rel = calib.t1 - calib.R_rel * calib.t0;
+    }
+
+    // ── Downscale images and intrinsics ────────────────────────
+    if (img_scale != 1.0) {
+        cv::resize(imgLeft,  imgLeft,  cv::Size(), img_scale, img_scale, cv::INTER_AREA);
+        cv::resize(imgRight, imgRight, cv::Size(), img_scale, img_scale, cv::INTER_AREA);
+        for (cv::Mat* K : {&calib.K0, &calib.K1}) {
+            K->at<double>(0,0) *= img_scale;
+            K->at<double>(1,1) *= img_scale;
+            K->at<double>(0,2) = (K->at<double>(0,2) + 0.5) * img_scale - 0.5;
+            K->at<double>(1,2) = (K->at<double>(1,2) + 0.5) * img_scale - 0.5;
+        }
+        std::cout << "Downscaled to " << imgLeft.cols << "x" << imgLeft.rows
+                  << " (scale=" << img_scale << ")\n";
+    }
 
     // ── 2. Rectification ───────────────────────────────────────
     std::cout << "\n=== Rectification ===\n";
@@ -103,14 +133,28 @@ int main(int argc, char** argv) {
 
     // ── 4. Depth + point cloud ─────────────────────────────────
     std::cout << "\n=== Depth & Point Cloud ===\n";
-    cv::Mat depth;
     PointCloud cloud;
     try {
-        depth = disparityToDepth(disp, calib);
-        cloud = depthToPointCloud(depth, calib, rect.left_rect);
+        cloud = disparityToCloud(disp, rect.Q, rect.left_rect, (float)mp.min_disparity);
     } catch (const std::exception& e) {
         std::cerr << "[pipeline] Depth/point cloud failed: " << e.what() << "\n";
         return 1;
+    }
+
+    // ── 5. Transform from rectified cam0 space → world space ────
+    // X_world = R0^T * (R0_rect^T * X_rect - t0)
+    {
+        cv::Mat R0t       = calib.R0.t();
+        cv::Mat R0_rect_t = rect.R0_rect.t();
+        for (auto& p : cloud.points) {
+            cv::Mat x = (cv::Mat_<double>(3,1) << p.x(), p.y(), p.z());
+            cv::Mat w = R0t * (R0_rect_t * x - calib.t0);
+            p = Eigen::Vector3f((float)w.at<double>(0),
+                                (float)w.at<double>(1),
+                                (float)w.at<double>(2));
+        }
+        std::cout << "[pipeline] Transformed " << cloud.points.size()
+                  << " points to world space.\n";
     }
 
     std::string save_path_pointcloud = "results/scene" + sceneId + "/pointcloud";

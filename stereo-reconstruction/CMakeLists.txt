@@ -90,8 +90,8 @@ add_library(stereo_lib OBJECT
     src/DataLoader.cpp
 )
 target_compile_definitions(stereo_lib PRIVATE PIPELINE_BUILD)
-target_include_directories(stereo_lib PRIVATE include ${OpenCV_INCLUDE_DIRS}
-                                               ${EIGEN3_INCLUDE_DIR} ${Flann_INCLUDE_DIR})
+target_include_directories(stereo_lib PRIVATE include ${OpenCV_INCLUDE_DIRS} ${Flann_INCLUDE_DIR})
+target_link_libraries(stereo_lib PUBLIC Eigen3::Eigen)
 
 add_executable(pipeline src/pipeline.cpp)
 target_link_libraries(pipeline stereo_lib ${OpenCV_LIBS} Eigen3::Eigen)

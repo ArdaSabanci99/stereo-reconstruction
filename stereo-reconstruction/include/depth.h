@@ -14,6 +14,13 @@ cv::Mat disparityToDepth(const cv::Mat& disparity, const CalibData& calib);
 PointCloud depthToPointCloud(const cv::Mat& depth, const CalibData& calib,
                               const cv::Mat& color_img = cv::Mat());
 
+// Convert disparity map directly to point cloud using the Q matrix from
+// cv::stereoRectify — correct after OpenCV-based rectification.
+// Q: 4x4 disparity-to-depth mapping matrix from RectifyResult.
+PointCloud disparityToCloud(const cv::Mat& disp, const cv::Mat& Q,
+                             const cv::Mat& color_img = cv::Mat(),
+                             float min_disparity = 0.0f);
+
 // Estimate per-vertex normals from depth map using central differences.
 // Populates cloud.normals in the same order as depthToPointCloud.
 void estimateNormals(PointCloud& cloud, const cv::Mat& depth, const CalibData& calib);

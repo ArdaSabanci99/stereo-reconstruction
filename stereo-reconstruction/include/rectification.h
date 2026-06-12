@@ -8,6 +8,7 @@ struct RectifyResult {
     cv::Mat right_rect;
     cv::Mat Q;          // disparity-to-depth mapping matrix (4x4)
     cv::Mat P1, P2;     // new projection matrices
+    cv::Mat R0_rect;    // left camera rectification rotation (from stereoRectify)
 };
 
 // OpenCV-based rectification (baseline implementation)

@@ -83,6 +83,36 @@ void estimateNormals(PointCloud& cloud, const cv::Mat& depth, const CalibData& c
     std::cout << "[depth] Normals estimated: " << cloud.normals.size() << "\n";
 }
 
+// ── Disparity → Point Cloud via Q matrix (correct after OpenCV rectification) ──
+PointCloud disparityToCloud(const cv::Mat& disp, const cv::Mat& Q,
+                             const cv::Mat& color_img, float min_disparity) {
+    cv::Mat xyz;
+    cv::reprojectImageTo3D(disp, xyz, Q, /*handleMissingValues=*/false);
+
+    bool has_color = !color_img.empty();
+    PointCloud cloud;
+
+    for (int y = 0; y < xyz.rows; ++y) {
+        for (int x = 0; x < xyz.cols; ++x) {
+            const cv::Vec3f& p = xyz.at<cv::Vec3f>(y, x);
+            // SGBM invalid marker = (min_disparity - 1), so strict < min_disparity
+            if (disp.at<float>(y, x) < min_disparity) continue;
+            if (p[2] <= 0 || p[2] > 5e3f) continue;
+
+            cloud.points.emplace_back(p[0], p[1], p[2]);
+
+            if (has_color) {
+                cv::Vec3b c = color_img.at<cv::Vec3b>(y, x);
+                cloud.colors.emplace_back(c[2], c[1], c[0], 255);
+            } else {
+                cloud.colors.emplace_back(200, 200, 200, 255);
+            }
+        }
+    }
+    std::cout << "[depth] Point cloud: " << cloud.points.size() << " points\n";
+    return cloud;
+}
+
 // ── DLT triangulation (for non-rectified / fused pairs) ──────────────────
 
 Eigen::Matrix<float,3,4> buildProjectionMatrix(const cv::Mat& K,

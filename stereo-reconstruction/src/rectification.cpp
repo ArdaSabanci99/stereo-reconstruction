@@ -14,15 +14,11 @@ RectifyResult rectifyOpenCV(const cv::Mat& left, const cv::Mat& right,
     cv::Mat D0 = cv::Mat::zeros(5, 1, CV_64F);
     cv::Mat D1 = cv::Mat::zeros(5, 1, CV_64F);
 
-    // TODO: temporary identity and no translation? Later will use R, t computed in sparse matching?
-    cv::Mat T  = (cv::Mat_<double>(3,1) << -calib.baseline, 0, 0);
-    cv::Mat R  = cv::Mat::eye(3, 3, CV_64F);
-
     cv::Mat R0, R1, P1, P2, Q;
     cv::stereoRectify(calib.K0, D0, calib.K1, D1,
-                      img_size, R, T,
+                      img_size, calib.R_rel, calib.T_rel,
                       R0, R1, P1, P2, Q,
-                      cv::CALIB_ZERO_DISPARITY, 0);
+                      cv::CALIB_ZERO_DISPARITY, -1);
 
     cv::Mat map0x, map0y, map1x, map1y;
     cv::initUndistortRectifyMap(calib.K0, D0, R0, P1, img_size, CV_32FC1, map0x, map0y);
@@ -35,9 +31,10 @@ RectifyResult rectifyOpenCV(const cv::Mat& left, const cv::Mat& right,
     if (result.left_rect.empty() || result.right_rect.empty())
         throw std::runtime_error("[rectifyOpenCV] Rectified images are empty after remap.");
 
-    result.Q  = Q;
-    result.P1 = P1;
-    result.P2 = P2;
+    result.Q      = Q;
+    result.P1     = P1;
+    result.P2     = P2;
+    result.R0_rect = R0;
 
     std::cout << "[rectification] OpenCV done.\n";
     return result;
