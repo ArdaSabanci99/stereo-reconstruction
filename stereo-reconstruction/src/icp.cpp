@@ -71,7 +71,7 @@ PointCloud fusePointClouds(const std::vector<PointCloud>& clouds, int max_iter) 
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "Usage: icp <cloud1.ply> <cloud2.ply> [cloud3.ply ...]\n"
-                  << "  Outputs results/fused.ply and results/fused.off\n";
+                  << "  Outputs results/icp_fused.ply and results/icp_fused.off\n";
         return 1;
     }
 
@@ -80,8 +80,11 @@ int main(int argc, char** argv) {
     // for (int i = 1; i < argc; ++i)
     //     clouds.push_back(loadPointCloud(argv[i]));  // TODO: implement loader
     // PointCloud fused = fusePointClouds(clouds);
-    // savePointCloud   (fused, "results/fused.ply");
-    // savePointCloudOFF(fused, "results/fused.off");
+    
+    // std::string save_path = "results/icp_fused";
+    // fs::create_directories(save_path);
+    // savePointCloud(fused, save_path + "/fused.ply");
+    // savePointCloudOFF(fused, save_path + "/fused.off");
 
     std::cout << "[ICP] Standalone not yet fully implemented.\n";
     return 0;

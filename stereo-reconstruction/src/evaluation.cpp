@@ -90,23 +90,23 @@ void printEvalResult(const EvalResult& r, const std::string& label) {
 
 #ifndef PIPELINE_BUILD
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cerr << "Usage: evaluation <scene_dir> [disparity_raw.png]\n"
-                  << "  Ground truth loaded from <scene_dir>/disp0GT.pfm\n";
-        return 1;
-    }
-    fs::path scene(argv[1]);
-    std::string disp_path = (argc >= 3) ? argv[2] : "results/disparity_raw.png";
+    // if (argc < 2) {
+    //     std::cerr << "Usage: evaluation <scene_dir> [disparity_raw.png]\n"
+    //               << "  Ground truth loaded from <scene_dir>/disp0GT.pfm\n";
+    //     return 1;
+    // }
+    // fs::path scene(argv[1]);
+    // std::string disp_path = (argc >= 3) ? argv[2] : "results/disparity_raw.png";
 
-    CalibData calib = loadCalib(scene);
-    cv::Mat gt   = loadPFM(scene / "disp0GT.pfm");
-    cv::Mat disp = loadDisparity(disp_path);
+    // CalibData calib = loadCalib(scene);
+    // cv::Mat gt   = loadPFM(scene / "disp0GT.pfm");
+    // cv::Mat disp = loadDisparity(disp_path);
 
-    if (gt.empty())   { std::cerr << "Ground truth not loaded.\n"; return 1; }
-    if (disp.empty()) { std::cerr << "Disparity not loaded.\n";    return 1; }
+    // if (gt.empty())   { std::cerr << "Ground truth not loaded.\n"; return 1; }
+    // if (disp.empty()) { std::cerr << "Disparity not loaded.\n";    return 1; }
 
-    EvalResult result = evaluateDisparity(disp, gt, calib.vmin, calib.vmax);
-    printEvalResult(result, "Disparity Evaluation");
+    // EvalResult result = evaluateDisparity(disp, gt, calib.vmin, calib.vmax);
+    // printEvalResult(result, "Disparity Evaluation");
     return 0;
 }
 #endif
